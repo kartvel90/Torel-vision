@@ -1,31 +1,46 @@
-import express from "express";
-import fetch from "node-fetch";
-import cors from "cors";
-
-const app = express();
-app.use(cors());
-app.use(express.raw({ type: "*/*" }));
+import http from "http";
+import https from "https";
+import { URL } from "url";
 
 const TARGET = process.env.TARGET;
+const targetUrl = new URL(TARGET);
 
-app.all("*", async (req, res) => {
-  try {
-    const url = TARGET + req.originalUrl;
+// تشخیص TLS
+const isTLS = targetUrl.protocol === "https:";
 
-    const response = await fetch(url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
-    });
+// ست کردن SNI برای TLS
+const agent = isTLS
+  ? new https.Agent({
+      servername: targetUrl.hostname, // مهم‌ترین بخش
+      rejectUnauthorized: false       // جلوگیری از خطای سرتیفیکیت
+    })
+  : undefined;
 
-    const buffer = await response.arrayBuffer();
-    res.status(response.status);
-    res.send(Buffer.from(buffer));
-  } catch (err) {
-    res.status(502).send("Relay Error");
-  }
+const server = http.createServer((clientReq, clientRes) => {
+  const options = {
+    hostname: targetUrl.hostname,
+    port: targetUrl.port,
+    path: clientReq.url,
+    method: clientReq.method,
+    headers: clientReq.headers,
+    agent: agent
+  };
+
+  const proxyReq = (isTLS ? https : http).request(options, (proxyRes) => {
+    clientRes.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(clientRes);
+  });
+
+  proxyReq.on("error", (err) => {
+    console.error("Proxy error:", err);
+    clientRes.writeHead(502);
+    clientRes.end("Bad Gateway");
+  });
+
+  clientReq.pipe(proxyReq);
 });
 
-app.listen(3000, () => {
-  console.log("Render Relay is running on port 3000");
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => {
+  console.log(`Relay running on port ${PORT}`);
 });
