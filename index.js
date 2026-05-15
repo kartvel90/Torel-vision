@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.raw({ type: "*/*" }));
 
-const TARGET = "https://YOUR_REAL_SERVER:443";
+const TARGET = process.env.TARGET;
 
 app.all("*", async (req, res) => {
   try {
